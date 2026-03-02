@@ -131,6 +131,6 @@ jobs:
         if: env.PROCEED_TO_BUILD == 'true'
         uses: vedantmgoyal2009/winget-releaser@v2
         with:
-          identifier: mpv.mpv
+          identifier: shinchiro.mpv
           installers-regex: '\.exe$'
           token: ${{ secrets.WINGET_TOKEN }}
