@@ -1,0 +1,11 @@
+# Inno Setup output
+Output/
+*.exe
+
+# Downloaded binaries
+*.7z
+mpv_extracted/
+
+# Default ignores
+.DS_Store
+Thumbs.db
