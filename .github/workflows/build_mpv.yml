@@ -81,12 +81,6 @@ jobs:
         run: |
           # The extracted files are directly in the mpv_extracted folder
           $source_dir = "$pwd\mpv_extracted"
-          
-          # Ensure an icon exists for the installer, download official mpv icon
-          if (-not (Test-Path "installer\mpv-icon.ico")) {
-              New-Item -ItemType Directory -Force -Path "installer"
-              Invoke-WebRequest -Uri "https://raw.githubusercontent.com/mpv-player/mpv/master/etc/mpv-icon.ico" -OutFile "installer\mpv-icon.ico"
-          }
 
           # Compile the Inno Setup script
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /dMyAppVersion=$env:MPV_TAG /dSourceDir=$source_dir .\build_mpv.iss
