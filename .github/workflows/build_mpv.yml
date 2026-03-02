@@ -76,10 +76,8 @@ jobs:
       - name: Compile Windows Installer
         if: env.VERSION_MATCH == 'true'
         run: |
-          # Locate the inner folder containing the extracted binaries
-          $source_dir = (Get-ChildItem -Path "mpv_extracted" -Directory).FullName
-          if ($source_dir -is [array]) { $source_dir = $source_dir[0] }
-          if (-not $source_dir) { $source_dir = "$pwd\mpv_extracted" }
+          # The extracted files are directly in the mpv_extracted folder
+          $source_dir = "$pwd\mpv_extracted"
           
           # Ensure an icon exists for the installer, download official mpv icon
           if (-not (Test-Path "installer\mpv-icon.ico")) {
