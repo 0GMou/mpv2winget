@@ -3,16 +3,15 @@ name: MPV to Winget Automated Build
 on:
   schedule:
     - cron: '0 0 * * *' # Runs daily at midnight UTC
-  workflow_dispatch: # Allows manual triggering from the GitHub Actions UI
+  workflow_dispatch: # Allows manual triggering
 
 permissions:
-  contents: write # Needed to create releases
-  pull-requests: write # Needed for winget-releaser
+  contents: write
+  pull-requests: write
 
 jobs:
-  build-and-publish:
+  check-and-build:
     runs-on: windows-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -20,31 +19,68 @@ jobs:
       - name: Fetch Latest MPV Official Release Tag
         id: mpv_api
         run: |
-          $tag = (Invoke-RestMethod -Uri "https://api.github.com/repos/mpv-player/mpv/releases/latest").tag_name
+          $mpv_release = Invoke-RestMethod -Uri "https://api.github.com/repos/mpv-player/mpv/releases/latest"
+          $tag = $mpv_release.tag_name
           echo "MPV_TAG=$tag" >> $env:GITHUB_ENV
           echo "Official MPV Tag: $tag"
 
+      - name: Fetch Our Latest Release Tag
+        id: our_api
+        run: |
+          $ErrorActionPreference = 'SilentlyContinue'
+          $our_release = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/latest"
+          if ($our_release) {
+              $our_tag = $our_release.tag_name
+              echo "OUR_TAG=$our_tag" >> $env:GITHUB_ENV
+              echo "Our Latest Release: $our_tag"
+          } else {
+              echo "OUR_TAG=NONE" >> $env:GITHUB_ENV
+              echo "Our Latest Release: None (First run)"
+          }
+
+      - name: PHASE 1 - Compare Official vs Ours
+        id: phase1
+        run: |
+          if ($env:OUR_TAG -eq "NONE") {
+              echo "No previous release found. PROCEEDING to build."
+              echo "PROCEED_TO_PHASE2=true" >> $env:GITHUB_ENV
+          } elseif ($env:MPV_TAG -eq $env:OUR_TAG) {
+              echo "Our release ($env:OUR_TAG) is already equal to Official ($env:MPV_TAG). HALTING."
+              echo "PROCEED_TO_PHASE2=false" >> $env:GITHUB_ENV
+          } else {
+              echo "Official ($env:MPV_TAG) is SUPERIOR to ours ($env:OUR_TAG). PROCEEDING to check Shinchiro."
+              echo "PROCEED_TO_PHASE2=true" >> $env:GITHUB_ENV
+          }
+
+      - name: Halt if up to date
+        if: env.PROCEED_TO_PHASE2 == 'false'
+        run: |
+          echo "We are already up to date. Exiting gracefully."
+          exit 0
+
       - name: Fetch Latest Shinchiro Release
+        if: env.PROCEED_TO_PHASE2 == 'true'
         id: shinchiro_api
         run: |
           $release = Invoke-RestMethod -Uri "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest"
-          $shinchiro_tag = $release.tag_name
           
-          # Looking for the x86_64-v3 archive
+          # Prioritize x86_64-v3 archive
           $assetUrl = ($release.assets | Where-Object { $_.name -match "mpv-x86_64-v3-.*\.7z" }).browser_download_url
           if (-not $assetUrl) {
               $assetUrl = ($release.assets | Where-Object { $_.name -match "mpv-x86_64-.*\.7z" }).browser_download_url
           }
           
           echo "DOWNLOAD_URL=$assetUrl" >> $env:GITHUB_ENV
-          echo "Shinchiro Tag: $shinchiro_tag"
+          echo "Shinchiro Download URL: $assetUrl"
 
       - name: Download and Extract Shinchiro Build
+        if: env.PROCEED_TO_PHASE2 == 'true'
         run: |
           Invoke-WebRequest -Uri $env:DOWNLOAD_URL -OutFile "mpv_build.7z"
           7z x mpv_build.7z -o"mpv_extracted"
 
-      - name: Test Build & Verify Version
+      - name: PHASE 2 - Test Build & Verify Version
+        if: env.PROCEED_TO_PHASE2 == 'true'
         run: |
           $mpv_bin = (Get-ChildItem -Path "mpv_extracted" -Filter "mpv.com" -Recurse).FullName
           if (-not $mpv_bin) { $mpv_bin = (Get-ChildItem -Path "mpv_extracted" -Filter "mpv.exe" -Recurse).FullName }
@@ -54,40 +90,34 @@ jobs:
           echo "MPV Execution Output:"
           echo "$version_output"
           
-          # Parse the exact version number without 'v' prefix
           $clean_tag = $env:MPV_TAG.TrimStart('v')
           
-          # Strict check to ensure the shinchiro build matches the official stable tag
           if ($version_output -match $clean_tag) {
-              echo "✅ Version validation passed! ($clean_tag)"
-              echo "VERSION_MATCH=true" >> $env:GITHUB_ENV
+              echo "✅ Shinchiro build matches official stable tag ($clean_tag). PROCEEDING."
+              echo "PROCEED_TO_BUILD=true" >> $env:GITHUB_ENV
           } else {
-              echo "❌ Version mismatch. Expected stable: $clean_tag"
-              echo "VERSION_MATCH=false" >> $env:GITHUB_ENV
+              echo "❌ Shinchiro build is INFERIOR/Different from stable ($clean_tag). HALTING."
+              echo "PROCEED_TO_BUILD=false" >> $env:GITHUB_ENV
           }
 
-      - name: Halt on Mismatch
-        if: env.VERSION_MATCH == 'false'
+      - name: Halt on Shinchiro Mismatch
+        if: env.PROCEED_TO_PHASE2 == 'true' && env.PROCEED_TO_BUILD == 'false'
         run: |
-          echo "Stopping workflow. Awaiting stable build synchronization."
-          exit 0 # Exits gracefully to wait for the next day
+          echo "Stopping workflow. Awaiting stable build synchronization from Shinchiro."
+          exit 0
 
       - name: Install Inno Setup
-        if: env.VERSION_MATCH == 'true'
+        if: env.PROCEED_TO_BUILD == 'true'
         run: choco install innosetup -y --no-progress
 
-      - name: Compile Windows Installer
-        if: env.VERSION_MATCH == 'true'
+      - name: PHASE 3 - Compile Windows Installer
+        if: env.PROCEED_TO_BUILD == 'true'
         run: |
-          # The extracted files are directly in the mpv_extracted folder
           $source_dir = "$pwd\mpv_extracted"
-
-          # Compile the Inno Setup script
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /dMyAppVersion=$env:MPV_TAG /dSourceDir=$source_dir .\build_mpv.iss
 
       - name: Publish GitHub Release
-        id: create_release
-        if: env.VERSION_MATCH == 'true'
+        if: env.PROCEED_TO_BUILD == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.MPV_TAG }}
@@ -98,7 +128,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Submit to Winget
-        if: env.VERSION_MATCH == 'true'
+        if: env.PROCEED_TO_BUILD == 'true'
         uses: vedantmgoyal2009/winget-releaser@v2
         with:
           identifier: mpv.mpv
