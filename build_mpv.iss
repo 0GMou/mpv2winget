@@ -6,7 +6,7 @@ AppName=MPV Player
 AppVersion={#MyAppVersion}
 UninstallDisplayName=MPV Player
 UninstallDisplayIcon={app}\mpv.exe
-SetupIconFile={#SourceDir}\installer\mpv-icon.ico
+SetupIconFile=.\installer\mpv-icon.ico
 
 ; Modern Windows architecture support
 ArchitecturesInstallIn64BitMode=x64compatible
