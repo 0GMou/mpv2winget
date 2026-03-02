@@ -46,8 +46,11 @@ jobs:
 
       - name: Test Build & Verify Version
         run: |
-          $mpv_exe = (Get-ChildItem -Path "mpv_extracted" -Filter "mpv.exe" -Recurse).FullName
-          $version_output = & $mpv_exe --version
+          $mpv_bin = (Get-ChildItem -Path "mpv_extracted" -Filter "mpv.com" -Recurse).FullName
+          if (-not $mpv_bin) { $mpv_bin = (Get-ChildItem -Path "mpv_extracted" -Filter "mpv.exe" -Recurse).FullName }
+          if ($mpv_bin -is [array]) { $mpv_bin = $mpv_bin[0] }
+          
+          $version_output = (& $mpv_bin --version) | Out-String
           echo "MPV Execution Output:"
           echo "$version_output"
           
@@ -60,7 +63,7 @@ jobs:
               echo "VERSION_MATCH=true" >> $env:GITHUB_ENV
           } else {
               echo "❌ Version mismatch. Expected stable: $clean_tag"
-              echo "VERSION_MATCH=true" >> $env:GITHUB_ENV # TEMPORARY OVERRIDE FOR TESTING
+              echo "VERSION_MATCH=false" >> $env:GITHUB_ENV
           }
 
       - name: Halt on Mismatch
