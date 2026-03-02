@@ -81,11 +81,10 @@ jobs:
           if ($source_dir -is [array]) { $source_dir = $source_dir[0] }
           if (-not $source_dir) { $source_dir = "$pwd\mpv_extracted" }
           
-          # Ensure an icon exists for the installer, create a blank one if not found
+          # Ensure an icon exists for the installer, download official mpv icon
           if (-not (Test-Path "installer\mpv-icon.ico")) {
               New-Item -ItemType Directory -Force -Path "installer"
-              # Fallback: using a generic default if you haven't supplied the icon yet
-              echo "Icon placeholder" > "installer\mpv-icon.ico"
+              Invoke-WebRequest -Uri "https://raw.githubusercontent.com/mpv-player/mpv/master/etc/mpv-icon.ico" -OutFile "installer\mpv-icon.ico"
           }
 
           # Compile the Inno Setup script
