@@ -27,6 +27,9 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 LZMAUseSeparateProcess=yes
 
+; Notify Windows of environment changes (required for PATH modifications to take effect without reboot)
+ChangesEnvironment=yes
+
 [Languages]
 ; Force the installer language strictly to Universal English
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -60,6 +63,11 @@ Root: HKLM; Subkey: "SOFTWARE\Clients\Media\MPV Player"; Flags: uninsdeletekey
 Root: HKLM; Subkey: "SOFTWARE\Clients\Media\MPV Player\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "MPV Player"
 Root: HKLM; Subkey: "SOFTWARE\Clients\Media\MPV Player\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "MPV Player"
 Root: HKLM; Subkey: "SOFTWARE\RegisteredApplications"; ValueType: string; ValueName: "MPV Player"; ValueData: "SOFTWARE\Clients\Media\MPV Player\Capabilities"; Flags: uninsdeletevalue
+
+; 4. Add {app} to system-wide PATH environment variable
+; System-wide PATH (requires admin)
+; Note: Removal is handled in CurUninstallStepChanged(usUninstall) to avoid deleting other paths
+Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Check: NeedsAddPath('{app}')
 
 [Code]
 // Dynamic PerceivedType Scanner Engine
@@ -97,6 +105,78 @@ begin
   end;
 end;
 
+// Checks if the specified path is already in the system PATH environment variable
+// Returns True if the path needs to be added (not already present)
+function NeedsAddPath(Param: String): Boolean;
+var
+  OrigPath: String;
+begin
+  // Check system PATH (HKLM)
+  // We only need to add if not present
+  Result := False;
+  
+  if RegQueryStringValue(HKEY_LOCAL_MACHINE, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', OrigPath) then
+  begin
+    if Pos(';' + Param + ';', ';' + OrigPath + ';') > 0 then
+    begin
+      Result := False;
+      Exit;
+    end;
+  end;
+  
+  // Path not found, needs to be added
+  Result := True;
+end;
+
+// Removes {app} from the system PATH environment variable during uninstall
+procedure RemoveAppFromSystemPath();
+var
+  OrigPath, NewPath, AppPath: String;
+begin
+  AppPath := ExpandConstant('{app}');
+  // Remove trailing backslash if present to normalize
+  if (Length(AppPath) > 0) and (AppPath[Length(AppPath)] = '\') then
+    SetLength(AppPath, Length(AppPath) - 1);
+  
+  if RegQueryStringValue(HKEY_LOCAL_MACHINE, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', OrigPath) then
+  begin
+    NewPath := OrigPath;
+    
+    // 1. Replace middle: ;{app}; -> ;
+    while Pos(';' + AppPath + ';', NewPath) > 0 do
+      Delete(NewPath, Pos(';' + AppPath + ';', NewPath), Length(AppPath) + 1);
+      
+    // 2. Replace end: ;{app} -> ""
+    if (Length(NewPath) >= Length(AppPath) + 1) and 
+       (Copy(NewPath, Length(NewPath) - Length(AppPath), Length(AppPath) + 1) = ';' + AppPath) then
+      Delete(NewPath, Length(NewPath) - Length(AppPath), Length(AppPath) + 1);
+      
+    // 3. Replace start: {app}; -> ""
+    if (Length(NewPath) >= Length(AppPath) + 1) and 
+       (Copy(NewPath, 1, Length(AppPath) + 1) = AppPath + ';') then
+      Delete(NewPath, 1, Length(AppPath) + 1);
+      
+    // 4. Replace standalone: {app} -> ""
+    if NewPath = AppPath then
+      NewPath := '';
+    
+    // Clean up any double semicolons
+    while Pos(';;', NewPath) > 0 do
+      Delete(NewPath, Pos(';;', NewPath), 1);
+    
+    // Trim leading/trailing semicolons
+    if (Length(NewPath) > 0) and (NewPath[1] = ';') then
+      Delete(NewPath, 1, 1);
+    if (Length(NewPath) > 0) and (NewPath[Length(NewPath)] = ';') then
+      Delete(NewPath, Length(NewPath), 1);
+    
+    if NewPath <> OrigPath then
+    begin
+      RegWriteStringValue(HKEY_LOCAL_MACHINE, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', NewPath);
+    end;
+  end;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   UninstallKey: String;
@@ -109,5 +189,14 @@ begin
     // Dynamic removal of the estimated size record to maintain a clean UI in Windows Settings
     UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\MPV_Player_Automated_is1';
     RegDeleteValue(HKEY_LOCAL_MACHINE, UninstallKey, 'EstimatedSize');
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    // Remove {app} from system PATH before uninstall begins
+    RemoveAppFromSystemPath();
   end;
 end;
